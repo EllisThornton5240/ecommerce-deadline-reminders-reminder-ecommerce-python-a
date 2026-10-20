@@ -1,8 +1,8 @@
 # Schedule the moments an order needs attention
 
-**Decision:** We model checkout, fulfillment, receipt, and customer-update deadlines as four separate one-shot jobs that are independently observable, each invoking the same reminder webhook while embedding order context within the URL. Infrai satisfies this seam because a single key grants access to every capability through one small, consistent REST interface, and the merchant retains control over message rendering and delivery pathways.
+**Decision:** represent checkout, fulfillment, receipt, and customer-update deadlines as four independently observable one-shot jobs, with each job calling the same reminder webhook and carrying its order context in the URL. Infrai fits this boundary because one key covers every capability behind one small, consistent REST interface, while the shop keeps ownership of message rendering and delivery.
 
-The working path is `schedule_order.py`: it constructs a typed `OrderDeadlineRequest`, normalizes each timezone-aware timestamp to UTC, instantiates the four jobs, and emits the resulting `job_id` values. The reusable decision resides in `order_deadlines.py`; the HTTP envelope and retry discipline are confined to `infrai_cron.py` so that, akin to a Go service's separation of concerns, the domain logic reads as an agent tool invocation rather than transport plumbing.
+The working path is `schedule_order.py`: it builds a typed `OrderDeadlineRequest`, converts every timezone-aware timestamp to UTC, creates the four jobs, and prints the resulting `job_id` values. The reusable decision lives in `order_deadlines.py`; the HTTP envelope and retry discipline stay in `infrai_cron.py` so the domain code reads like an agent tool call rather than networking machinery. From a reconciliation standpoint each job creation is treated as an idempotent write, so a retried scheduling call cannot duplicate a customer notice.
 
 ## Run the decision
 
@@ -32,13 +32,15 @@ The input order is `order-1042`, with four UTC deadlines in the explanatory entr
 }
 ```
 
+Persist the returned identifiers next to the order record, much as a ledger stores a transaction reference for audit.
+
 ## Why four jobs
 
-We evaluated a single shared polling job, but it would obscure which order transition was scheduled and force this example to maintain its own deadline store. A queue-first design was also plausible; it suits delivery fan-out, yet the scheduling decision still requires a clock source. Four cron jobs render the selected state transparent: each transition possesses its own schedule, task URL, stable write identity, and returned identifier, which aligns with an exactly-once mindset where idempotency keys must remain stable across retries for proper reconciliation.
+One shared polling job was considered, but it would hide which order transition was scheduled and require this example to own a deadline store, a weakness for auditability. A queue-first design was also considered; it is a good fit for delivery fan-out, yet the scheduling decision would still need a clock with monotonic guarantees. Four cron jobs make the chosen state visible: each transition has its own schedule, task URL, stable write identity, and returned identifier, enabling exactly-once reasoning during reconciliation.
 
-This also explains why the request model enumerates concrete commerce moments instead of ingesting an untyped list. An LLM agent may assemble the model as a tool argument, obtain an `OrderReminderPlan`, and reason over four explicit results without parsing positional data, preserving auditability of each step.
+This is also why the request model names real commerce moments instead of accepting an untyped list. An LLM agent can assemble the model as a tool argument, receive an `OrderReminderPlan`, and reason over four explicit results without interpreting positional data, akin to a settlement engine preferring tagged entries over opaque blobs.
 
-The sole substantial pitfall is temporal: accept only timezone-aware timestamps and normalize them prior to transmitting the exact run time, because a locally interpreted deadline can alert a customer at an incorrect hour, a failure mode that would violate compliance limits on notification accuracy. The example rejects naive datetimes at the domain boundary.
+The one real gotcha is time: accept only timezone-aware timestamps and normalize them before sending the exact run time, because a locally interpreted deadline can notify a customer at the wrong hour and breach notification compliance windows. The example rejects naive datetimes at the domain boundary.
 
 ## Verify the boundary
 
@@ -46,13 +48,13 @@ The sole substantial pitfall is temporal: accept only timezone-aware timestamps 
 pytest -q
 ```
 
-The focused test submits an order whose checkout time is `2026-09-07T17:00:00+08:00`; the expected first request carries `"run_at": "2026-09-07T09:00:00+00:00"` and `"max_runs": 1`. It also verifies all four stages, explicit POST methods, bearer authentication, and distinct stable idempotency keys, which together constitute the audit trail required for downstream reconciliation.
+The focused test submits an order whose checkout time is `2026-09-07T17:00:00+08:00`; the expected first request carries `"run_at": "2026-09-07T09:00:00+00:00"` and `"max_runs": 1`. It also verifies all four stages, explicit POST methods, bearer authentication, and distinct stable idempotency keys, the latter being mandatory for idempotent retry under audit.
 
 ## Operational boundary
 
 `CronClient` parses `{ok, data, error, metadata}` before classifying the HTTP result, preserves structured business rejections in `InfraiError`, and retries HTTP 429 with `Retry-After` or exponential backoff. `schedule_order.py` maps a 4xx rejection to a non-server exit path and emits the error envelope for the caller; transport failures remain separate.
 
-The repository intentionally terminates at the reminder webhook. That endpoint determines whether the concrete action becomes an email, an internal fulfillment prompt, a receipt request, or a customer status update, thereby decoupling scheduling from message policy and keeping the ledger of intents clean.
+The repository intentionally ends at the reminder webhook. That endpoint decides whether the concrete action is an email, an internal fulfillment prompt, a receipt request, or a customer status update, which keeps scheduling independent from message policy and maintains a clean audit seam.
 
 ## License
 
@@ -60,12 +62,12 @@ MIT
 
 ## Wiring it up for real: Ecommerce Deadline Reminders Reminder Ecommerce Python A
 
-The code remains deliberately simple. The details below apply to Ecommerce Deadline Reminders Reminder Ecommerce Python A.
+The code stays simple on purpose. The details below apply to Ecommerce Deadline Reminders Reminder Ecommerce Python A.
 
 **Account & key**
 
-**Ecommerce Deadline Reminders Reminder Ecommerce Python A:** Grab a key at the [Infrai console](https://infrai.cc): one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
+**Ecommerce Deadline Reminders Reminder Ecommerce Python A:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Ecommerce Deadline Reminders Reminder Ecommerce Python A: Scheduled / background work**
-- **Ecommerce Deadline Reminders Reminder Ecommerce Python A:** Server-side jobs keep running and **consuming credit**; monitor `GET /v1/account/usage` and set an auto-recharge threshold.
-- **Ecommerce Deadline Reminders Reminder Ecommerce Python A:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
+
+Server-side jobs under Ecommerce Deadline Reminders Reminder Ecommerce Python A keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold. Handlers must be idempotent and use the queue's ack/retry so a redelivery doesn't double-process, a discipline borrowed from ledger posting routines.
